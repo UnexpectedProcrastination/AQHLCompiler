@@ -1,0 +1,162 @@
+array PrintChar[] = {
+	0b010000_000_000_0000, //out a; 
+	0b010000_000_100_0000, //out 0;
+	0b000110_111_000_0000  //ret;
+};
+
+array WriteOutput[] = {
+	0b010000_000_000_0000, //out a;
+	0b000110_111_000_0000  //ret;
+};
+
+array ReadInput[] = {
+	0b100011_000_000_0000, //in a; 
+	0b000110_111_000_0000  //ret;
+};
+
+array ReadChar[] = {
+	0b001011_010_000_0000, // set c, ip;
+	0b100011_000_000_0000, //in a; 
+	0b000001_111_010_0101, //jump:z, c;
+	0b001011_010_000_0000, // set c, ip;
+	0b100011_001_000_0000, //in b; 
+	0b000001_111_010_0110, //jump:nz, c;
+	0b000110_111_000_0000  //ret;
+};
+
+/*
+array Clear[] = {
+	0b000001_001_111_0000, '\b', // set b, '\b';
+	0b001011_010_000_0000, // set c, ip;
+	0b010000_000_001_0000, //out b;
+	0b010000_000_100_0000, //out 0;
+	0b111010_000_101_0000, //dec a;
+	0b000001_111_010_0110, //jump:nz, c;
+	0b000110_111_000_0000  //ret;
+};
+*/
+
+
+function Clear() {
+	PrintString("\e[2J\e[H");
+}
+
+
+function ReadLine(buffer, size) {
+	var pointer = buffer;
+
+	for (var end = buffer + size - 1; pointer #< end;) {
+		var char = ReadChar();
+		
+		if (char == '\b') {
+			if (pointer != buffer) {
+				PrintChar(char);
+				PrintChar(' ');
+				PrintChar(char);
+				--pointer;
+			}
+		} else if (char == '\n') {
+			PrintChar(char);
+			break;
+		} else {
+			PrintChar(char);
+			*(pointer++) = char;
+		}
+	}
+	
+	*pointer = 0;
+}
+
+function PrintString(string) {
+	for (var char; char = *string; ++string) {
+		PrintChar(char);
+	}
+}
+
+function PrintInt(num) {
+	if (num < 0) {
+		PrintChar('-');
+		num = -num;
+	}
+	
+	PrintUInt(num);
+}
+
+function PrintUInt(num) {
+	if (num == 0) {
+		PrintChar('0');
+		return;
+	}
+
+	var digits = [5];
+	var digitCount = 0;
+	
+	while (num) {
+		digits[digitCount++] = num % 10;
+		num /= 10;
+	}
+	
+	while (digitCount) {
+		PrintChar(digits[--digitCount] + '0');
+	}
+}
+
+function PrintHex(num, lowercase) {
+	if (num == 0) {
+		PrintChar('0');
+		return;
+	}
+
+	var digits = [4];
+	var digitCount = 0;
+	
+	while (num) {
+		digits[digitCount++] = num & 15; // Need to use & and #>> since we have no unsigned / and %
+		num #>>= 4;
+	}
+	
+	var chars = lowercase ? "0123456789abcdef" : "0123456789ABCDEF";
+	
+	while (digitCount) {
+		PrintChar(chars[digits[--digitCount]]);
+	}
+}
+
+function PrintFormat(format, varargs) {
+	for (var char; char = *format; ++format) {
+		if (char == '%') {
+		
+		
+			var spec = *(++format);
+			
+			if (spec == '%') {
+				PrintChar('%');
+				continue;
+			}
+			
+			var value = *(varargs++);
+			
+			while (spec =='p') {
+				value = *value;
+				
+				spec = *(++format);
+			}
+			
+			if (spec == 's') {
+				PrintString(value);
+			} else if (spec == 'i') {
+				PrintInt(value);
+			} else if (spec == 'u') {
+				PrintUInt(value);
+			} else if (spec == 'h') {
+				PrintHex(value, true);
+			} else if (spec == 'H') {
+				PrintHex(value, false);
+			} else if (spec == 'c') {
+				PrintChar(value);
+			}
+		} else {
+			PrintChar(char);
+		}
+	}
+}

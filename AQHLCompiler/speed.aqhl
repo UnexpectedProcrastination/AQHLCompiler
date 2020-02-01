@@ -1,0 +1,7 @@
+#load "tictactoe.aqhl"
+#load "Meta.aqhl"
+#load "Memory.aqhl"
+#load "Strings.aqhl"
+#load "Test.aqhl"
+#load "IO.aqhl"
+#load "Math.aqhl"

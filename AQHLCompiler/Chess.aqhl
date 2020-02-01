@@ -1,0 +1,784 @@
+#load "IO.aqhl"
+#load "Memory.aqhl"
+
+// hasMoved flag 0x100
+// isWhite flag  0x8000
+
+// Pieces
+// K king   0x4B
+// Q queen  0x51
+// R rook   0x52
+// B bishop 0x42
+// N knight 0x4E
+// P pawn   0x50
+
+array local board[64] = {
+		'R' | WHITE_FLAG, 'N' | WHITE_FLAG, 'B' | WHITE_FLAG, 'Q' | WHITE_FLAG, 'K' | WHITE_FLAG, 'B' | WHITE_FLAG, 'N' | WHITE_FLAG, 'R' | WHITE_FLAG, 
+		'P' | WHITE_FLAG, 'P' | WHITE_FLAG, 'P' | WHITE_FLAG, 'P' | WHITE_FLAG, 'P' | WHITE_FLAG, 'P' | WHITE_FLAG, 'P' | WHITE_FLAG, 'P' | WHITE_FLAG, 
+		 0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 , 
+		 0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 , 
+		 0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 , 
+		 0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 , 
+		'P', 'P', 'P', 'P', 'P', 'P', 'P', 'P', 
+		'R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R', 
+};
+
+array local boardCopy[64] = {
+		'R' | WHITE_FLAG, 'N' | WHITE_FLAG, 'B' | WHITE_FLAG, 'Q' | WHITE_FLAG, 'K' | WHITE_FLAG, 'B' | WHITE_FLAG, 'N' | WHITE_FLAG, 'R' | WHITE_FLAG, 
+		'P' | WHITE_FLAG, 'P' | WHITE_FLAG, 'P' | WHITE_FLAG, 'P' | WHITE_FLAG, 'P' | WHITE_FLAG, 'P' | WHITE_FLAG, 'P' | WHITE_FLAG, 'P' | WHITE_FLAG, 
+		 0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 , 
+		 0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 , 
+		 0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 , 
+		 0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 , 
+		'P', 'P', 'P', 'P', 'P', 'P', 'P', 'P', 
+		'R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R', 
+};
+
+var local hasValidMove = false;
+array local validMoves[64];
+
+var local enPassant = -1;
+
+const local WHITE_FLAG = 0x8000;
+const local HAS_MOVED_FLAG = 0x100;
+
+function Main() {
+	var whiteTurn = WHITE_FLAG;
+	
+	var promotion = [16];
+	
+	while (true) {	
+		Clear();
+		DrawBoard(-1);
+		
+		hasValidMove = false;
+		each (*piece, i: board, 64) {
+			if ((piece & WHITE_FLAG) == whiteTurn) {
+				GetValidMoves(i);
+				
+				if (hasValidMove) break;
+			}
+		}
+		
+		if (!hasValidMove) {
+			if (IsInCheck(FindKing(whiteTurn))) {
+				PrintString(whiteTurn ? "Checkmate. White wins!" : "Checkmate. Black wins!");
+			} else {
+				PrintString("Stalemate. Draw.");
+			}
+			
+			return;
+		}
+		
+		PrintString(whiteTurn ? "White's turn\n" : "Black's turn\n");
+		
+		if (IsInCheck(FindKing(whiteTurn))) {
+			PrintString("Check.\n");
+		}
+			
+		PrintString("Pick a piece to move... ");
+		
+		var success;
+		
+		while (true) {
+			var pieceToMove = ReadPosition();
+			
+			if (pieceToMove == -1 || board[pieceToMove] == 0) {
+				PrintString("\e[A\r\e[KPick a piece to move... ");
+			} else if ((board[pieceToMove] & WHITE_FLAG) == whiteTurn) {
+				Clear();
+				
+				MemoryZero(validMoves, 64);
+				GetValidMoves(pieceToMove);
+				
+				DrawBoard(pieceToMove);
+				PrintString("Pick a move... ");
+				
+				var moveTo;
+		
+				while (true) {
+					moveTo = ReadPosition();
+					
+					if (moveTo == -1 || validMoves[moveTo]) {
+						break;
+					} else {
+						PrintString("\e[A\r\e[KCan't move there... ");
+					}
+				}
+				
+				if (moveTo != -1) {
+					
+					var win = (board[moveTo] & 0xFF) == 'K';
+					
+					if ((board[pieceToMove] & 0xFF) == 'P' && moveTo - pieceToMove == -16) {
+						enPassant = pieceToMove - 8;
+					} else if (board[pieceToMove] == ('P' | WHITE_FLAG) && moveTo - pieceToMove == 16) {
+						enPassant = pieceToMove + 8;
+					} else {
+						enPassant = -1;
+					}
+					
+					DoMove(pieceToMove, moveTo);
+					UpdateMove(board, boardCopy, pieceToMove, moveTo);
+					
+					if (win) {
+						MemoryZero(validMoves, 64);
+						
+						Clear();
+						DrawBoard(moveTo);
+					}
+					
+					if ((board[moveTo] & 0xFF) == 'P' && moveTo #< 8 || moveTo #>= 56) { // The pawn should be promoted
+						MemoryZero(validMoves, 64);
+						
+						Clear();
+						DrawBoard(moveTo);
+						
+						PrintString("Choose a promotion... ");
+						var promoteTo;
+						
+						while (true) {
+							ReadLine(promotion, 16);
+							
+							var c = promotion[0];
+							
+							if (c == 'q' || c == 'Q') {
+								promoteTo = 'Q';
+								break;
+							} else if (c == 'r' || c == 'R' || c == 'c' || c == 'C') {
+								promoteTo = 'R';
+								break;
+							} else if (c == 'b' || c == 'B') {
+								promoteTo = 'B';
+								break;
+							} else if (c == 'n' || c == 'N' || c == 'k' || c == 'K' ) {
+								promoteTo = 'N';
+								break;
+							} else {
+								PrintString("\e[A\r\e[KChoose a promotion... ");
+							}
+						}
+						
+						
+						board[moveTo] = promoteTo | (board[moveTo] & WHITE_FLAG);
+						boardCopy[moveTo] = board[moveTo];
+					}
+				
+					whiteTurn = whiteTurn ^ WHITE_FLAG;
+				}
+				
+				MemoryZero(validMoves, 64);
+				break;
+			} else {
+				PrintString("\e[A\r\e[KThat's not your piece... ");
+			}
+		}
+		
+		
+	}
+}
+
+function local FindKing(color) {
+	var unmoved = color | 'K';
+	var moved = color | 'K' | HAS_MOVED_FLAG;
+
+	each (*p, i: boardCopy, 64) {
+		if (p == unmoved || p == moved) return i;
+	}
+	
+	return 0;
+}
+
+function local AddValidMoveIfNotInCheck(pos, move) {
+	DoMove(pos, move);
+	
+	if (!IsInCheck(FindKing(boardCopy[move] & WHITE_FLAG))) {
+		hasValidMove = true;
+		validMoves[move] = true;
+	}
+	
+	UpdateMove(boardCopy, board, pos, move); // Reset the copied board to the old state
+}
+
+function local IsInCheck(pos) {
+	
+	var row = pos / 8;
+	var column = pos % 8;
+
+	var color = boardCopy[pos] & WHITE_FLAG;
+	var otherColor = color ? 0 : WHITE_FLAG;
+	
+	if (color) { // This is the white king
+		if (row #< 7) {
+			if (column #> 0 && (boardCopy[pos + 7] & ~HAS_MOVED_FLAG) == ('P' | otherColor)) { // If there is a black pawn down and left it can take us
+				return true;
+			}
+			
+			if (column #< 7 && (boardCopy[pos + 9] & ~HAS_MOVED_FLAG) == ('P' | otherColor)) { // If there is a black pawn down and right it can take us
+				return true;
+			}
+		}
+	} else { // This is the black king
+		if (row #> 0) {
+			if (column #> 0 && (boardCopy[pos - 9] & ~HAS_MOVED_FLAG) == ('P' | otherColor)) { // If there is a white pawn up and left it can take us
+				return true;
+			}
+			
+			if (column #< 7 && (boardCopy[pos + 9] & ~HAS_MOVED_FLAG) == ('P' | otherColor)) { // If there is a white pawn up and right it can take us
+				return true;
+			}
+		}
+	}
+	
+	if (row #< 6) {
+		if (column #> 0 && (boardCopy[pos + 15] & ~HAS_MOVED_FLAG) == ('N' | otherColor)) {
+			return true;
+		}
+		
+		if (column #< 7 && (boardCopy[pos + 17] & ~HAS_MOVED_FLAG) == ('N' | otherColor)) {
+			return true;
+		}
+	}
+		
+	if (row #< 7) {
+		if (column #> 0 && (boardCopy[pos + 7] & ~HAS_MOVED_FLAG) == ('K' | otherColor)) {
+			return true;
+		}
+		
+		if (column #> 1 && (boardCopy[pos + 6] & ~HAS_MOVED_FLAG) == ('N' | otherColor)) {
+			return true;
+		}
+		
+		if (column #< 7 && (boardCopy[pos + 9] & ~HAS_MOVED_FLAG) == ('K' | otherColor)) {
+			return true;
+		}
+		
+		if (column #< 6 && (boardCopy[pos + 10] & ~HAS_MOVED_FLAG) == ('N' | otherColor)) {
+			return true;
+		}
+		
+		if ((boardCopy[pos + 8] & ~HAS_MOVED_FLAG) == ('K' | otherColor)) {
+			return true;
+		}
+	}
+	
+	if (row #> 1) {
+		if (column #> 0 && (boardCopy[pos - 17] & ~HAS_MOVED_FLAG) == ('N' | otherColor)) {
+			return true;
+		}
+		
+		if (column #< 7 && (boardCopy[pos - 15] & ~HAS_MOVED_FLAG) == ('N' | otherColor)) {
+			return true;
+		}
+	}
+	
+	if (row #> 0) {
+		if (column #> 0 && (boardCopy[pos - 9] & ~HAS_MOVED_FLAG) == ('K' | otherColor)) {
+			return true;
+		}
+	
+		if (column #> 1 && (boardCopy[pos - 10] & ~HAS_MOVED_FLAG) == ('N' | otherColor)) {
+			return true;
+		}
+		
+		
+		if (column #< 7 && (boardCopy[pos - 7] & ~HAS_MOVED_FLAG) == ('K' | otherColor)) {
+			return true;
+		}
+		
+		if (column #< 6 && (boardCopy[pos - 6] & ~HAS_MOVED_FLAG) == ('N' | otherColor)) {
+			return true;
+		}
+		
+		if ((boardCopy[pos - 8] & ~HAS_MOVED_FLAG) == ('K' | otherColor)) {
+			return true;
+		}
+	}
+	
+	if (column #> 0 && (boardCopy[pos - 1] & ~HAS_MOVED_FLAG) == ('K' | otherColor)) {
+		return true;
+	}
+		
+	if (column #< 7 && (boardCopy[pos + 1] & ~HAS_MOVED_FLAG) == ('K' | otherColor)) {
+		return true;
+	}
+	
+	each (r: row + 1 .. 8) {
+		var p = r * 8 + column;
+	
+		if (boardCopy[p]) {
+			if (CanRookMove(p, otherColor)) {
+				return true;
+			}
+		
+			break;
+		}
+	}
+	
+	for (var r = row - 1; r >= 0; r--) {
+		var p = r * 8 + column;
+	
+		if (boardCopy[p]) {
+			if (CanRookMove(p, otherColor)) {
+				return true;
+			}
+		
+			break;
+		}
+	}
+	
+	each (c: column + 1 .. 8) {
+		var p = row * 8 + c;
+	
+		if (boardCopy[p]) {
+			if (CanRookMove(p, otherColor)) {
+				return true;
+			}
+		
+			break;
+		}
+	}
+	
+	for (var c = column - 1; c >= 0; c--) {
+		var p = row * 8 + c;
+	
+		if (boardCopy[p]) {
+			if (CanRookMove(p, otherColor)) {
+				return true;
+			}
+		
+			break;
+		}
+	}
+	
+	var r = row + 1;
+	var c = column + 1;
+	
+	while (r < 8 && c < 8) {
+		var p = r * 8 + c;
+		
+		if (boardCopy[p]) {
+			if (CanBishopMove(p, otherColor)) {
+				return true;
+			}
+		
+			break;
+		}
+	
+		r++;
+		c++;
+	}
+	
+	r = row + 1;
+	c = column - 1;
+	
+	while (r < 8 && c >= 0) {
+		var p = r * 8 + c;
+		
+		if (boardCopy[p]) {
+			if (CanBishopMove(p, otherColor)) {
+				return true;
+			}
+		
+			break;
+		}
+	
+		r++;
+		c--;
+	}
+	
+	r = row - 1;
+	c = column + 1;
+	
+	while (r >= 0 && c < 8) {
+		var p = r * 8 + c;
+		
+		if (boardCopy[p]) {
+			if (CanBishopMove(p, otherColor)) {
+				return true;
+			}
+		
+			break;
+		}
+	
+		r--;
+		c++;
+	}
+	
+	r = row - 1;
+	c = column - 1;
+	
+	while (r >= 0 && c >= 0) {
+		var p = r * 8 + c;
+		
+		if (boardCopy[p]) {
+			if (CanBishopMove(p, otherColor)) {
+				return true;
+			}
+		
+			break;
+		}
+	
+		r--;
+		c--;
+	}
+	
+	return false;
+}
+
+function local CanRookMove(pos, color) {
+	var piece = boardCopy[pos] & ~HAS_MOVED_FLAG;
+
+	return piece == ('R' | color) || piece == ('Q' | color);
+}
+
+
+function local CanBishopMove(pos, color) {
+	var piece = boardCopy[pos] & ~HAS_MOVED_FLAG;
+
+	return piece == ('B' | color) || piece == ('Q' | color);
+}
+
+function local GetValidMoves(pos) {
+	var row = pos / 8;
+	var column = pos % 8;
+	
+
+	var piece = board[pos];
+	
+	var moved = piece & HAS_MOVED_FLAG;
+	var color = piece & WHITE_FLAG;
+	piece &= 0xFF;
+	
+	if (piece == 'P' && !color) { // If this is a black pawn
+		if (row #> 0) { // Black pawns always move up
+			if (!board[pos - 8]) { // Move one up to an empty space
+				AddValidMoveIfNotInCheck(pos, pos - 8);
+				
+				if (!moved && !board[pos - 16]) {  // Move two up to an empty space if the middle is empty and we haven't moved
+					AddValidMoveIfNotInCheck(pos, pos - 16);
+				}
+			}
+			
+			if (column #> 0 && (board[pos - 9] < 0 || pos - 9 == enPassant)) { // Capture a white piece up and left
+				AddValidMoveIfNotInCheck(pos, pos - 9);
+			}
+			
+			if (column #< 7 && (board[pos - 7] < 0 || pos - 7 == enPassant)) { // Capture a white piece up and right
+				AddValidMoveIfNotInCheck(pos, pos - 7);
+			}
+		}
+	} else if (piece == 'P' && color) { // If this is a white pawn
+		if (row #< 7) { // White pawns always move up
+			if (!board[pos + 8]) { // Move one down to an empty space
+				AddValidMoveIfNotInCheck(pos, pos + 8);
+				
+				if (!moved && !board[pos + 16]) {  // Move two down to an empty space if the middle is empty and we haven't moved
+					AddValidMoveIfNotInCheck(pos, pos + 16);
+				}
+			}
+			
+			if (column #> 0 && (board[pos + 7] > 0 || pos + 7 == enPassant)) { // Capture a black piece down and left
+				AddValidMoveIfNotInCheck(pos, pos + 7);
+			}
+			
+			if (column #< 7 && (board[pos + 9] > 0 || pos + 9 == enPassant)) { // Capture a black piece down and right
+				AddValidMoveIfNotInCheck(pos, pos + 9);
+			}
+		}
+	} else if (piece == 'N') {
+		if (row #< 6) {
+			if (column #> 0 && (!board[pos + 15] || (board[pos + 15] & WHITE_FLAG) != color)) {
+				AddValidMoveIfNotInCheck(pos, pos + 15);
+			}
+			
+			if (column #< 7 && (!board[pos + 17] || (board[pos + 17] & WHITE_FLAG) != color)) {
+				AddValidMoveIfNotInCheck(pos, pos + 17);
+			}
+		}
+		
+		if (row #< 7) {		
+			if (column #> 1 && (!board[pos + 6] || (board[pos + 6] & WHITE_FLAG) != color)) {
+				AddValidMoveIfNotInCheck(pos, pos + 6);
+			}
+			
+			if (column #< 6 && (!board[pos + 10] || (board[pos + 10] & WHITE_FLAG) != color)) {
+				AddValidMoveIfNotInCheck(pos, pos + 10);
+			}
+		}
+		
+		if (row #> 1) {
+			if (column #> 0 && (!board[pos - 17] || (board[pos - 17] & WHITE_FLAG) != color)) {
+				AddValidMoveIfNotInCheck(pos, pos - 17);
+			}
+			
+			if (column #< 7 && (!board[pos - 15] || (board[pos - 15] & WHITE_FLAG) != color)) {
+				AddValidMoveIfNotInCheck(pos, pos - 15);
+			}
+		}
+		
+		if (row #> 0) {
+			if (column #> 1 && (!board[pos - 10] || (board[pos - 10] & WHITE_FLAG) != color)) {
+				AddValidMoveIfNotInCheck(pos, pos - 10);
+			}
+			
+			if (column #< 6 && (!board[pos - 6] || (board[pos - 6] & WHITE_FLAG) != color)) {
+				AddValidMoveIfNotInCheck(pos, pos - 6);
+			}
+		}
+	} else if (piece == 'R') {
+		RookMoves(pos, color, row, column);
+	} else if (piece == 'B') {
+		BishopMoves(pos, color, row, column);
+	} else if (piece == 'Q') {
+		RookMoves(pos, color, row, column);
+		BishopMoves(pos, color, row, column);
+	} else if (piece == 'K') {
+		if (!moved && !IsInCheck(pos)) {
+		
+			if (!board[pos + 1] && !board[pos + 2] && board[pos + 3] == ('R' | color)) { // castle right
+				AddValidMoveIfNotInCheck(pos, pos + 2);
+			}
+			
+			if (!board[pos - 1] && !board[pos - 2] && !board[pos - 3] && board[pos - 4] == ('R' | color)) { // castle left
+				AddValidMoveIfNotInCheck(pos, pos - 2);
+			}
+		}
+			
+		if (row #> 0) {
+			if (!board[pos - 8] || (board[pos - 8] & WHITE_FLAG) != color) {
+				AddValidMoveIfNotInCheck(pos, pos - 8);
+			}
+			
+			if (column #> 0 && (!board[pos - 9] || (board[pos - 9] & WHITE_FLAG) != color)) {
+				AddValidMoveIfNotInCheck(pos, pos - 9);
+			}
+			
+			if (column #< 7 && (!board[pos - 7] || (board[pos - 7] & WHITE_FLAG) != color)) {
+				AddValidMoveIfNotInCheck(pos, pos - 7);
+			}
+		}
+		
+		if (row #< 7) {
+			if (!board[pos + 8] || (board[pos + 8] & WHITE_FLAG) != color) {
+				AddValidMoveIfNotInCheck(pos, pos + 8);
+			}
+			
+			if (column #> 0 && (!board[pos + 7] || (board[pos + 7] & WHITE_FLAG) != color)) {
+				AddValidMoveIfNotInCheck(pos, pos + 7);
+			}
+			
+			if (column #< 7 && (!board[pos + 9] || (board[pos + 9] & WHITE_FLAG) != color)) {
+				AddValidMoveIfNotInCheck(pos, pos + 9);
+			}
+		}
+		
+		if (column #> 0 && (!board[pos - 1] || (board[pos - 1] & WHITE_FLAG) != color)) {
+			AddValidMoveIfNotInCheck(pos, pos - 1);
+		}
+			
+		if (column #< 7 && (!board[pos + 1] || (board[pos + 1] & WHITE_FLAG) != color)) {
+			AddValidMoveIfNotInCheck(pos, pos + 1);
+		}
+	}
+}
+
+function local DoMove(pieceToMove, moveTo) {
+	var piece = board[pieceToMove] & 0xFF;
+	var delta = moveTo - pieceToMove;
+	
+	if (piece == 'K' && delta == 2) { // We are castling right
+		boardCopy[pieceToMove + 1] = board[pieceToMove + 3] | HAS_MOVED_FLAG; // Move the rook to the place it should be
+		boardCopy[pieceToMove + 3] = 0;
+	} else if (piece == 'K' && delta == -2) { // We are castling left
+		boardCopy[pieceToMove - 1] = board[pieceToMove - 4] | HAS_MOVED_FLAG; // Move the rook to the place it should be
+		boardCopy[pieceToMove - 4] = 0;
+	} else if (piece == 'P' && (delta == 7 || delta == 9) && !board[moveTo]) { // This pawn is moving down diagonally to an empty square so must be doing en passant
+		boardCopy[moveTo - 8] = 0; // Capture the pawn
+	} else if (piece == 'P' && (delta == -9 || delta == -7) && !board[moveTo]) { // This pawn is moving up diagonally to an empty square so must be doing en passant
+		boardCopy[moveTo + 8] = 0; // Capture the pawn
+	}
+	
+	
+	boardCopy[moveTo] = board[pieceToMove] | HAS_MOVED_FLAG;
+	boardCopy[pieceToMove] = 0;
+}
+
+function local UpdateMove(dest, src, pieceToMove, moveTo) {
+	dest[pieceToMove] = src[pieceToMove];
+	dest[moveTo] = src[moveTo];
+	
+	if (moveTo == 6 || moveTo == 62) { // We could have castled right
+		dest[pieceToMove + 1] = src[pieceToMove + 1];
+		dest[pieceToMove + 3] = src[pieceToMove + 3];
+	}
+	
+	if (moveTo == 2 || moveTo == 58) { // We could have castled left
+		dest[pieceToMove - 4] = src[pieceToMove - 4];
+		dest[pieceToMove - 1] = src[pieceToMove - 1];
+	}
+	
+	if (moveTo #>= 5 * 8 && moveTo #< 6 * 8) { // We could have en passant captured downwards
+		dest[moveTo - 8] = src[moveTo - 8];
+	}
+	
+	
+	if (moveTo #>= 2 * 8 && moveTo #< 3 * 8) { // We could have en passant captured upwards
+		dest[moveTo + 8] = src[moveTo + 8];
+	}
+}
+
+function local TryMoveThrough(originalPos, color, row, column) {
+	var pos = row * 8 + column;
+		
+	if (!board[pos]) {
+		AddValidMoveIfNotInCheck(originalPos, pos);
+		
+		return true;
+	} else {
+		if ((board[pos] & WHITE_FLAG) != color) {
+			AddValidMoveIfNotInCheck(originalPos, pos);
+		}
+		
+		return false;
+	}
+}
+
+function local RookMoves(pos, color, row, column) {
+	each (r: row + 1 .. 8) {
+		if (!TryMoveThrough(pos, color, r, column)) break;
+	}
+	
+	for (var r = row - 1; r >= 0; r--) {
+		if (!TryMoveThrough(pos, color, r, column)) break;
+	}
+	
+	var r = row;
+	
+	each (c: column + 1 .. 8) {
+		if (!TryMoveThrough(pos, color, r, c)) break;
+	}
+	
+	for (var c = column - 1; c >= 0; c--) {
+		if (!TryMoveThrough(pos, color, r, c)) break;
+	}
+}
+
+function local BishopMoves(pos, color, row, column) {
+	var r = row;
+	var c = column;
+	
+	row = r + 1;
+	column = c + 1;
+	
+	while (row < 8 && column < 8) {
+		if (!TryMoveThrough(pos, color, row, column)) break;
+	
+		row++;
+		column++;
+	}
+	
+	row = r + 1;
+	column = c - 1;
+	
+	while (row < 8 && column >= 0) {
+		if (!TryMoveThrough(pos, color, row, column)) break;
+	
+		row++;
+		column--;
+	}
+	
+	row = r - 1;
+	column = c + 1;
+	
+	while (row >= 0 && column < 8) {
+		if (!TryMoveThrough(pos, color, row, column)) break;
+	
+		row--;
+		column++;
+	}
+	
+	row = r - 1;
+	column = c - 1;
+	
+	while (row >= 0 && column >= 0) {
+		if (!TryMoveThrough(pos, color, row, column)) break;
+	
+		row--;
+		column--;
+	}
+}
+
+
+
+function local ReadPosition() {
+	var moveBufferSize = 16;
+	
+	var moveBuffer = [moveBufferSize];
+	ReadLine(moveBuffer, moveBufferSize);
+	
+	var column = moveBuffer[0];
+	var row = moveBuffer[1];
+	
+	if (column #>= 'A' && column #<= 'H') {
+		column -= 'A';
+	} else if (column #>= 'a' && column #<= 'h') {
+		column -= 'a';
+	} else {
+		return -1;
+	}
+	
+	if (row #>= '1' && row #<= '8') {
+		row -= '1';
+	} else {
+		return -1;
+	}
+	
+	return row * 8 + column;
+}
+
+function local DrawBoard(selectedPiece) {
+	PrintString("\e[30;43m abcdefgh \n");
+
+	each (i: 64) {
+		var column = i % 8;
+		var row = i / 8;
+		
+		if (column == 0) {
+			PrintString("\e[30;43m");
+			PrintChar('1' + row);
+		}
+		
+		var isRed = column % 2 ^ row % 2;
+		
+		var piece = board[i];
+		
+		piece ||= ' ';
+		
+		if (validMoves[i]) {
+			PrintString("\e[42;");
+		} else if (i == selectedPiece) {
+			PrintString("\e[43;");
+		} else if (isRed) {
+			PrintString("\e[41;");
+		} else {
+			PrintString("\e[40;");
+		}
+		
+		if (piece < 0) {
+			PrintString("97m");
+		} else {
+			PrintString(i == selectedPiece ? "30m" : "90m");
+		}
+		
+		PrintChar(piece & 0xFF);
+		
+		if (column == 7) {
+			PrintString("\e[30;43m");
+			PrintChar('1' + row);
+			PrintChar('\n');
+		}
+	}
+	
+	PrintString("\e[30;43m abcdefgh \e[0m\n");
+}

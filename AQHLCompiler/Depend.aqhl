@@ -1,0 +1,10 @@
+const a = 5;
+
+array local d[a] = {b, c, 5, 7, e};
+
+const b = 123;
+const c = 437;
+
+var e = b;
+
+function Main() {}

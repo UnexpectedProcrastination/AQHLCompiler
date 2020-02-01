@@ -1,0 +1,146 @@
+#load "Meta.aqhl"
+
+var local heap; // Store the location of the bottom of the heap
+
+function local _Init() {
+	heap = _binaryEnd; // Set the heap at a safe point
+	*heap = 65535 - _binaryEnd; // Allocate a single block the size of the heap, using all the memory addresses above the heap base
+	heap[1] = 0; // There is no next block
+}
+
+function MemoryCopy(dest, src, size) {
+	each (*out: dest, size) {
+		out = *src;
+		src++;
+	}
+}
+
+function MemorySet(dest, size, value) {
+	each (*out: dest, size) out = value;
+}
+
+function MemoryZero(dest, size) {
+	each (*out: dest, size) out = 0;
+}
+
+function MemoryCompare(dest, src, size) {
+	var oldDest = dest;
+	
+	for (var end = dest + size; dest #< end; ++dest) {
+		if (*dest != *src) {
+			break;
+		}
+		
+		src++;
+	}
+	
+	return oldDest - dest;
+}
+
+function ZeroMemoryAlloc(size) {
+	var block = MemoryAlloc(size);
+	MemoryZero(block, size);
+	return block;
+}
+
+function local AllocBlock(size, selected, selectedSize, selectedPrevious) {
+	if (!selected) { // No large enough memory block was found so return 0
+		return 0;
+	}
+	
+	++size;
+
+	var next;
+	if (selectedSize #> size) { // If selected memory block is large enough, create a new memory block with the leftover size
+		next = selected + size ;
+		*selected = selectedSize;
+		*next = selectedSize - next + selected; // If we keep size live we spill a lot more registers, very code much slow
+		next[1] = selected[1];
+	} else { // Otherwise use the block after the selected one
+		next = selected[1];
+	}
+	
+	if (selectedPrevious) {
+		selectedPrevious[1] = next; // If there was a block before the allocated one update the linked list to point to the next memory block
+	} else {
+		heap = next; // Otherwise set starting block of the heap to the next memory block
+	}
+	
+	return selected	+ 1; // Return the memory block offseted by one to save the size for deallocation
+}
+
+// Linked list first fit allocator
+function FastAlloc(size) {
+	var current = heap;
+	
+	if (current) {
+		var currentSize = 0;
+		var previous = 0;
+		
+		while (current) { // Loop until no more blocks
+			currentSize = *current;
+			if (currentSize #>= size) { // Check if current block is large enough
+				break;
+			}
+			previous = current;
+			current = current[1];
+		}
+		
+		return AllocBlock(size, current, currentSize, previous);
+	} else {
+		return 0;
+	}
+}
+
+// Linked list best fit allocator
+function MemoryAlloc(size) {
+	var current = heap;  // Start at the bottom of the heap
+	
+	if (current) {
+		var selected = 0; 
+		var selectedSize = 0xFFFF; // Set selected size to max integer so that a block will always be chosen if there is a large enough one
+		var previous = 0;
+		var selectedPrevious = 0; // Track previous block to update linked list
+		while (current) { // Loop until no more blocks
+			var currentSize = *current;
+			if (currentSize #>= size && currentSize #< selectedSize) { // Check if current block is large enough
+																	   // and if current block is closer to correct size then previously selected block, select this one
+				selectedPrevious = previous;
+				selected = current;
+				selectedSize = currentSize;
+			}
+			previous = current;
+			current = current[1];
+		}
+			
+		return AllocBlock(size, selected, selectedSize, selectedPrevious);
+	} else {
+		return 0;
+	}
+}
+
+
+function MemoryDeAlloc(pointer) {
+	pointer--; // Move the pointer over the size of the block
+	
+	var current = heap;
+	var previous = 0; // Start at the bottom of the heap, track the previous block to update the linked list
+	
+	while (current #< pointer) { // Keep searching until we find the first free memory block after our pointer
+		previous = current;
+		current = current[1];
+	}
+	
+	if (previous) { // If there is a block before ours make its next block the pointer
+		previous[1] = pointer;
+	} else {
+		heap = pointer; // Otherwise set the bottom of the heap to our pointer
+	}
+	
+	if (pointer + pointer[0] == current) { // If the memory between our pointer and the free block is unallocated, merge the blocks
+		pointer[0] += current[0] + 1;
+		pointer[1] = current[1];
+	} else {
+		pointer[1] = current; // Otherwise set that block as the next block of the linked list
+	}
+}

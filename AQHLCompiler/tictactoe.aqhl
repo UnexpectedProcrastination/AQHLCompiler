@@ -1,0 +1,109 @@
+#load "IO.aqhl"
+
+array local board[9] = {
+		' ', ' ', ' ', 
+		' ', ' ', ' ', 
+		' ', ' ', ' '
+};
+
+array local indices[9] = {6, 7, 8, 3, 4, 5, 0, 1, 2};
+
+array local wins[2];
+
+function Main() {
+	var turn = 'X';
+	
+	PrintBoard();
+	PrintChar(turn);
+	PrintString("'s turn\n");
+	
+	while (true) {
+		var space = ReadChar();
+		
+		if (space #>= '1' && space #<= '9') {
+			var index = indices[space - '1'];
+			
+			if (board[index] == ' ') {
+				board[index] = turn;
+				
+				Clear();
+				
+				PrintBoard();
+				
+				if (CheckWinner(turn)) {
+					++wins[turn == 'X'];
+				
+					PrintChar(turn);
+					PrintString(" Wins!\nPress R to restart...\n");
+					
+					PrintFormat("X: %i O: %i", wins);
+				} else if (CheckDraw()) {
+					PrintString("Draw\nPress R to restart...\n");
+					
+					PrintFormat("X: %i O: %i", wins);
+				} else {
+					if (turn == 'X') {
+						turn = 'O';
+					} else if (turn == 'O') {
+						turn = 'X';
+					}
+				
+					PrintChar(turn);
+					PrintString("'s turn\n");
+				}
+			}
+		} else if (space == 'R') {
+			for (var i = 0; i < 9; i++) {
+				board[i] = ' ';
+			}
+			
+			turn = 'X';
+			
+			Clear();
+			PrintBoard();
+			PrintChar(turn);
+			PrintString("'s turn\n");
+		} else if (space == 'E') {
+			break;
+		}
+	}
+}
+
+function local PrintBoard() {
+	for (var i = 0; i #< 9;) {
+		PrintChar(board[i++]);
+		PrintChar('|');
+		PrintChar(board[i++]);
+		PrintChar('|');
+		PrintChar(board[i++]);
+		
+		if (i != 9) {
+			PrintString("\n-+-+-\n");
+		} else {
+			PrintChar('\n');
+		}
+	}
+	
+}
+
+function local CheckWinner(player) {
+	for (var i = 0; i #< 9; i += 3) {
+		return # if board[i] == player && board[i + 1] == player && board[i + 2] == player;
+	}
+	
+	for (var i = 0; i #< 3; i++) {
+		return # if board[i] == player && board[i + 3] == player && board[i + 6] == player;
+	}
+	
+	return # if board[0] == player && board[4] == player && board[8] == player;
+	
+	return board[4] == player && board[2] == player && board[6] == player;
+}
+
+function local CheckDraw() {
+	for (var i = 0; i #< 9; i++) {
+		return !# if board[i] == ' ';
+	}
+	
+	return true;
+}

@@ -1,0 +1,91 @@
+function local _Main() {
+	var a = 5 + 4 * -3;
+	
+	return a;
+}
+
+function local ShuffleTest(a, b, c, d) {
+	ShuffleTest(a, b, c, d);
+	ShuffleTest(a, a, a, a);
+	ShuffleTest(a, d, d, a);
+	ShuffleTest(b, d, d, a);
+	ShuffleTest(b, c, -1, d);
+}
+
+var local scopeVar = 10;
+
+function local ScopeTest() {
+	{
+		var scopeVar = 17;
+		scopeVar++;
+		ZeroMemoryAlloc(scopeVar);
+	}
+	
+	return scopeVar;
+}
+
+function local derefTest() {
+	var b;
+	
+
+}
+
+function local Sum(n) {
+	var total = 0;
+	
+	for (var i = 0; i < n; i++) {
+		total += i;
+	}
+	
+	return total;
+}
+
+
+/*
+function pure(a) {
+	return a + 1;
+}
+
+function impure(a) {
+	return a[0]++;
+}
+
+function impure2(a) {
+	return impure(a);
+}
+
+function recursionPure(a) {
+	return recursionPure(a);
+}
+
+function recursionPure2(a) {
+	return recursionPure2_(a);
+}
+
+function recursionPure2_(a) {
+	return recursionPure2(a);
+}
+
+function recursionImpure(a) {
+	return recursionImpure(--a[0]);
+}
+
+function recursionImpure2(a) {
+	return recursionImpure2_(a);
+}
+
+function recursionImpure2_(a) {
+	--a[0];
+	return recursionImpure2(a);
+}
+
+function purityTest(a) {
+	++pure(a);
+	++impure(a);
+	++impure2(a);
+	++recursionPure(a);
+	++recursionImpure(a);
+	++recursionPure2(a);
+	++recursionImpure2(a);
+}
+*/

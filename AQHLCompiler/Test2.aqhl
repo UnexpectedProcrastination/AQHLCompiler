@@ -1,0 +1,14 @@
+var dummy;
+
+function Main() {
+	
+}
+
+function Test(a) {
+	if (a) {
+		return a;
+	}
+	else {
+		return a;
+	}
+}

@@ -1,0 +1,3 @@
+const extern _binaryEnd; // This is where the base of the heap can safely be
+
+function extern _volatile(val);
