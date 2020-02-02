@@ -322,6 +322,8 @@ Reg Compiler::compileEq(Reg dest, AstNode *lhs, AstNode *rhs, Array<Ir> &ops) {
 
 u32 Compiler::compileIf(AstNode *node, Array<Ir> &ops, IrType op) {
 
+	bool innerEqIsOne = false;
+
 	while (true) {
 		AstTreeNode *tree = static_cast<AstTreeNode *>(node);
 		switch (node->type) {
@@ -359,6 +361,9 @@ u32 Compiler::compileIf(AstNode *node, Array<Ir> &ops, IrType op) {
 				break;
 			case AstType::ULESS:
 				op = op == IrType::IF_Z ? IrType::IF_AE : IrType::IF_B;
+				break;
+			case AstType::BIT_AND:
+				op = op == IrType::IF_Z ? IrType::IF_AND_Z : IrType::IF_AND_NZ;
 				break;
 		}
 
@@ -1515,6 +1520,8 @@ static bool canonizeOp(Ir *op) {
 			return false;
 		case IrType::IF_EQ:
 		case IrType::IF_NEQ:
+		case IrType::IF_AND_Z:
+		case IrType::IF_AND_NZ:
 		case IrType::AND:
 		case IrType::OR:
 		case IrType::XOR:
@@ -1706,44 +1713,161 @@ static bool isCompare(IrType type) {
 }
 
 static bool isConditionalBranch(IrType type) {
-	switch (type) {
-		case IrType::IF_Z:
-		case IrType::IF_NZ:
-		case IrType::IF_EQ:
-		case IrType::IF_NEQ:
-		case IrType::IF_G:
-		case IrType::IF_LE:
-		case IrType::IF_L:
-		case IrType::IF_GE:
-		case IrType::IF_A:
-		case IrType::IF_BE:
-		case IrType::IF_B:
-		case IrType::IF_AE:
-			return true;
-		default:
-			return false;
-	}
+	return type >= IrType::IF_Z && type <= IrType::IF_AND_NZ;
 }
 
 static bool isJump(IrType type) {
-	switch (type) {
-		case IrType::GOTO:
-		case IrType::IF_Z:
-		case IrType::IF_NZ:
-		case IrType::IF_EQ:
-		case IrType::IF_NEQ:
-		case IrType::IF_G:
-		case IrType::IF_LE:
-		case IrType::IF_L:
-		case IrType::IF_GE:
-		case IrType::IF_A:
-		case IrType::IF_BE:
-		case IrType::IF_B:
-		case IrType::IF_AE:
-			return true;
-		default:
-			return false;
+	return type >= IrType::IF_Z && type <= IrType::GOTO;
+}
+
+
+static bool continuesToNext(IrType type) {
+	return type != IrType::RETURN && type != IrType::GOTO;
+}
+
+
+static s64 findAndFlagLoop(DeclFunction *function, u32 index, u64 visited, u64 loop) {
+	Ir &op = function->ops[index];
+	if (!(visited & (1ULL << index))) {
+
+		visited |= 1ULL << index;
+		loop |= 1ULL << index;
+
+		if (continuesToNext(op.type) && index + 1 < function->ops.size()) {
+			s64 found = findAndFlagLoop(function, index + 1, visited, loop);
+
+			if (found != -1) {
+				if (found == -2 || found == index) {
+					return -2;
+				}
+
+				op.flags |= IR_IS_IN_LOOP;
+
+				return found;
+			}
+		}
+
+
+		if (isJump(op.type) && op.jumpTarget < function->ops.size()) {
+			s64 found = findAndFlagLoop(function, op.jumpTarget, visited, loop);
+
+			if (found != -1) {
+				if (found == -2 || found == index) {
+					return -2;
+				}
+
+				op.flags |= IR_IS_IN_LOOP;
+
+				return found;
+			}
+		}
+
+		loop &= ~(1ULL << index);
+
+		return -1;
 	}
+	else {
+		if (loop & (1ULL << index)) {
+			op.flags |= IR_IS_IN_LOOP;
+			return index;
+		}
+
+		return -1;
+	}
+}
+
+static constexpr u64 BIT_COUNT_IN_U64 = sizeof(u64) * CHAR_BIT;
+
+static s64 findAndFlagLoopSlow(DeclFunction *function, u32 index, u64 *visited, u64 *loop) {
+	Ir &op = function->ops[index];
+	if (!(visited[index / BIT_COUNT_IN_U64] & (1ULL << (index % BIT_COUNT_IN_U64)))) {
+
+		visited[index / BIT_COUNT_IN_U64] |= 1ULL << (index % BIT_COUNT_IN_U64);
+		loop[index / BIT_COUNT_IN_U64] |= 1ULL << (index % BIT_COUNT_IN_U64);
+
+
+		if (continuesToNext(op.type) && index + 1 < function->ops.size()) {
+			s64 found = findAndFlagLoopSlow(function, index + 1, visited, loop);
+
+			if (found != -1) {
+				if (found == -2 || found == index) {
+					return -2;
+				}
+
+				op.flags |= IR_IS_IN_LOOP;
+
+				return found;
+			}
+		}
+
+
+		if (isJump(op.type) && op.jumpTarget < function->ops.size()) {
+			s64 found = findAndFlagLoopSlow(function, op.jumpTarget, visited, loop);
+
+
+			if (found != -1) {
+				if (found == -2 || found == index) {
+					return -2;
+				}
+
+				op.flags |= IR_IS_IN_LOOP;
+
+				return found;
+			}
+		}
+
+		loop[index / BIT_COUNT_IN_U64] &= ~(1ULL << (index % BIT_COUNT_IN_U64));
+
+		return -1;
+	}
+	else {
+		if (loop[index / BIT_COUNT_IN_U64] & (1ULL << (index % BIT_COUNT_IN_U64))) {
+			op.flags |= IR_IS_IN_LOOP;
+			return index;
+		}
+
+		return -1;
+	}
+}
+
+static void findLoops(DeclFunction *function) {
+	for (u32 i = 0; i < function->ops.size(); i++) {
+		Ir &leader = function->ops[i];
+
+		if (leader.flags & IR_IS_LEADER && !(leader.flags & IR_IS_IN_LOOP)) {
+			findAndFlagLoop(function, i, 0, 0);
+		}
+	}
+}
+
+static void findLoopsSlow(DeclFunction *function) {
+	u64 size = (function->ops.size() + BIT_COUNT_IN_U64 - 1) / BIT_COUNT_IN_U64 * sizeof(u64);
+
+	u64 *visited = static_cast<u64 *>(alloca(size));
+	u64 *loop = static_cast<u64 *>(alloca(size));
+
+	for (u32 i = 0; i < function->ops.size(); i++) {
+		Ir &leader = function->ops[i];
+
+		if (leader.flags & IR_IS_LEADER && !(leader.flags & IR_IS_IN_LOOP)) {
+			memset(visited, 0, size);
+			findAndFlagLoopSlow(function, i, visited, loop);
+		}
+	}
+}
+
+void calculateInLoop(DeclFunction *function) {
+	PROFILE_FUNC();
+
+	if (!function->ops.size()) return;
+
+	if (function->ops.size() >= BIT_COUNT_IN_U64) {
+		findLoopsSlow(function);
+	}
+	else {
+		findLoops(function);
+	}
+
 }
 
 void calculateLeaders(DeclFunction *function) {
@@ -1752,7 +1876,7 @@ void calculateLeaders(DeclFunction *function) {
 	if (!function->ops.size()) return;
 
 	for (auto &op : function->ops) {
-		op.flags &= ~(IR_IS_LEADER | IR_IS_JUMP_TARGET);
+		op.flags = 0;
 	}
 
 	function->ops[0].flags |= IR_IS_LEADER;
@@ -1808,6 +1932,10 @@ IrType getOpposite(IrType a) {
 			return IrType::IF_AE;
 		case IrType::IF_AE:
 			return IrType::IF_B;
+		case IrType::IF_AND_Z:
+			return IrType::IF_AND_NZ;
+		case IrType::IF_AND_NZ:
+			return IrType::IF_AND_Z;
 		default:
 			assert(false);
 			return IrType::INVALID;
@@ -1816,35 +1944,7 @@ IrType getOpposite(IrType a) {
 }
 
 bool isOppositeBranch(IrType a, IrType b) {
-	switch (a) {
-		case IrType::IF_Z:
-			return b == IrType::IF_NZ;
-		case IrType::IF_NZ:
-			return b == IrType::IF_Z;
-		case IrType::IF_EQ:
-			return b == IrType::IF_NEQ;
-		case IrType::IF_NEQ:
-			return b == IrType::IF_EQ;
-		case IrType::IF_G:
-			return b == IrType::IF_LE;
-		case IrType::IF_LE:
-			return b == IrType::IF_G;
-		case IrType::IF_L:
-			return b == IrType::IF_GE;
-		case IrType::IF_GE:
-			return b == IrType::IF_L;
-		case IrType::IF_A:
-			return b == IrType::IF_BE;
-		case IrType::IF_BE:
-			return b == IrType::IF_A;
-		case IrType::IF_B:
-			return b == IrType::IF_AE;
-		case IrType::IF_AE:
-			return b == IrType::IF_B;
-		default:
-			return false;
-	}
-
+	return isConditionalBranch(b) && a == getOpposite(b);
 }
 
 static bool basicThreadJumps(DeclFunction *function) {
@@ -1939,11 +2039,6 @@ static bool basicThreadJumps(DeclFunction *function) {
 	return change;
 }
 
-
-static bool continuesToNext(IrType type) {
-	return type != IrType::RETURN && type != IrType::GOTO;
-}
-
 static bool deleteUnreachable(DeclFunction *function) {
 	PROFILE_FUNC();
 	bool change = false;
@@ -1997,7 +2092,7 @@ static bool removeNoops(DeclFunction *function) {
 	for (u32 i = 0; i < function->ops.size(); i++) {
 		if (function->ops[i].type == IrType::NOOP) {
 			if (i + 1 < function->ops.size()) {
-				function->ops[i + 1].flags |= function->ops[i].flags & (IR_IS_LEADER | IR_IS_JUMP_TARGET | IR_IS_MULTIPLE_JUMP_TARGET);
+				function->ops[i + 1].flags |= function->ops[i].flags & (IR_IS_LEADER | IR_IS_JUMP_TARGET | IR_IS_MULTIPLE_JUMP_TARGET | IR_IS_IN_LOOP);
 			}
 
 			for (u32 j = 0; j < function->ops.size(); j++) {
@@ -2028,8 +2123,6 @@ static bool removeNoops(DeclFunction *function) {
 
 	return change;
 }
-
-static constexpr u64 BIT_COUNT_IN_U64 = sizeof(u64) * CHAR_BIT;
 
 u64 getU64SForAllRegisters(DeclFunction *function) {
 	return function->largestReg / BIT_COUNT_IN_U64 + 1;
@@ -3102,6 +3195,16 @@ static bool simplifyConstantExpressions(DeclFunction *function) {
 					op.type = op.regs[0].number != 0 ? IrType::GOTO : IrType::NOOP;
 					change = true;
 					goto skip;
+				case IrType::IF_AND_Z:
+					op.regCount = 0;
+					op.type = (op.regs[0].unumber & op.regs[1].unumber) == 0 ? IrType::GOTO : IrType::NOOP;
+					change = true;
+					goto skip;
+				case IrType::IF_AND_NZ:
+					op.regCount = 0;
+					op.type = (op.regs[0].unumber & op.regs[1].unumber) != 0 ? IrType::GOTO : IrType::NOOP;
+					change = true;
+					goto skip;
 				default:
 					goto skip;
 			}
@@ -3729,6 +3832,60 @@ static bool simplifyConstantExpressions(DeclFunction *function) {
 				}
 				break;
 			}
+			case IrType::IF_AND_Z: {
+				if (op.regs[0] == op.regs[1]) {
+					op.type = IrType::IF_Z;
+					op.regCount = 1;
+					change = true;
+				}
+				else if (op.regs[1].type == RegType::IMMEDIATE) {
+					ulang number = op.regs[1].unumber;
+
+					if (op.regs[1].number == SLANG_MIN) { // If we are testing the sign bit is zero
+						op.type = IrType::IF_GE;
+						op.regs[1].number = 0;
+						change = true;
+					}
+					else if (number == 0) {
+						op.type = IrType::GOTO;
+						op.regCount = 0;
+						change = true;
+					}
+					else if (number == ULANG_MAX) {
+						op.type = IrType::IF_Z;
+						op.regCount = 1;
+						change = true;
+					}
+				}
+				break;
+			}
+			case IrType::IF_AND_NZ: {
+				if (op.regs[0] == op.regs[1]) {
+					op.type = IrType::IF_NZ;
+					op.regCount = 1;
+					change = true;
+				}
+				else if (op.regs[1].type == RegType::IMMEDIATE) {
+					ulang number = op.regs[1].unumber;
+
+					if (op.regs[1].number == SLANG_MIN) { // If we are testing the sign bit is one
+						op.type = IrType::IF_L;
+						op.regs[1].number = 0;
+						change = true;
+					}
+					else if (number == 0) {
+						op.type = IrType::NOOP;
+						op.regCount = 0;
+						change = true;
+					}
+					else if (number == ULANG_MAX) {
+						op.type = IrType::IF_NZ;
+						op.regCount = 1;
+						change = true;
+					}
+				}
+				break;
+			}
 		}
 
 		if (i + 1 < function->ops.size()) {
@@ -3863,6 +4020,10 @@ static bool branchWillBeTaken(ulang unumber, Ir &branch) {
 			return unumber < branch.regs[1].unumber;
 		case IrType::IF_AE:
 			return unumber >= branch.regs[1].unumber;
+		case IrType::IF_AND_Z:
+			return (unumber & branch.regs[1].unumber) == 0;
+		case IrType::IF_AND_NZ:
+			return (unumber & branch.regs[1].unumber) != 0;
 	}
 
 	assert(false);
@@ -3937,7 +4098,8 @@ static bool propagateInBasicBlock(DeclFunction *function, u32 *index) {
 			case IrType::BELOW:
 			case IrType::ABOVE_EQUAL:
 			case IrType::EQ:
-			case IrType::NOT_EQ: {
+			case IrType::NOT_EQ:
+			case IrType::AND: {
 				for (u32 i = propagate + 1; i < end; i++) {
 					Ir &op = function->ops[i];
 
@@ -3979,6 +4141,9 @@ static bool propagateInBasicBlock(DeclFunction *function, u32 *index) {
 							case IrType::NOT_EQ:
 								op.type = op.type == IrType::IF_NZ ? IrType::IF_NEQ : IrType::IF_EQ;
 								break;
+							case IrType::AND:
+								op.type = op.type == IrType::IF_NZ ? IrType::IF_AND_NZ : IrType::IF_AND_Z;
+								break;
 						}
 					}
 
@@ -4006,7 +4171,9 @@ static bool propagateInBasicBlock(DeclFunction *function, u32 *index) {
 			case IrType::IF_EQ:
 			case IrType::IF_NEQ:
 			case IrType::IF_Z:
-			case IrType::IF_NZ: {
+			case IrType::IF_NZ:
+			case IrType::IF_AND_Z:
+			case IrType::IF_AND_NZ: {
 				for (u32 i = propagate + 1; i < end; i++) {
 					Ir &op = function->ops[i];
 
@@ -4349,7 +4516,7 @@ static bool moveDuplicateOutOfBranchSlow(DeclFunction *function) {
 				if (isConditionalBranch(a.type) || !continuesToNext(a.type)) break;
 				if (a.type == IrType::READ || a.type == IrType::WRITE || a.type == IrType::CALL) continue;
 
-				if (a.flags & IR_IS_JUMP_TARGET) continue;
+				if (a.flags & IR_IS_JUMP_TARGET) break;
 
 				if (a.dest == branch.regs[0] || (branch.regCount == 2 && a.dest == branch.regs[1])) continue;
 
@@ -4378,7 +4545,9 @@ static bool moveDuplicateOutOfBranchSlow(DeclFunction *function) {
 					if (next == target) break;
 					Ir &b = function->ops[target];
 
-					if ((target != branch.jumpTarget && (b.flags & IR_IS_JUMP_TARGET)) || (b.flags & IR_IS_MULTIPLE_JUMP_TARGET)) break;
+					if (target != branch.jumpTarget && (b.flags & IR_IS_JUMP_TARGET)) break;
+					if (b.flags & IR_IS_MULTIPLE_JUMP_TARGET) 
+						break;
 
 					if (isConditionalBranch(b.type) || !continuesToNext(b.type)) break;
 
@@ -5225,8 +5394,7 @@ static void constraintsForConditionalBranch(Ir &op, Constraints *state, Constrai
 					}
 				}
 			}
-			else {
-				assert(op.type == IrType::IF_NZ);
+			else if (op.type == IrType::IF_NZ) {
 
 				addConstraint(leftState, { 0, 0 });
 
@@ -5238,7 +5406,9 @@ static void constraintsForConditionalBranch(Ir &op, Constraints *state, Constrai
 			}
 		}
 	}
-	else if (isConditionalBranch(op.type)) {
+	else {
+		assert(isConditionalBranch(op.type));
+
 		leftState.clear();
 		leftBranchState.clear();
 		rightState.clear();
@@ -5354,6 +5524,25 @@ static void constraintsForConditionalBranch(Ir &op, Constraints *state, Constrai
 
 				if (op.regs[1].type == RegType::REGISTER) {
 					constraintsForIfA(right, left, rightBranchState, rightState);
+				}
+
+				break;
+			}
+			case IrType::IF_AND_Z:
+			case IrType::IF_AND_NZ: {
+
+				if (op.regs[0].type == RegType::REGISTER) {
+					for (auto &constraint : state[op.regs[0].unumber]) {
+						leftState.add(constraint);
+						leftBranchState.add(constraint);
+					}
+				}
+
+				if (op.regs[1].type == RegType::REGISTER) {
+					for (auto &constraint : state[op.regs[1].unumber]) {
+						rightState.add(constraint);
+						rightBranchState.add(constraint);
+					}
 				}
 
 				break;
@@ -5843,6 +6032,10 @@ static bool constraintsForCondition(Ir &op, Constraints *state, bool *met) {
 
 			return false;
 		}
+		case IrType::IF_AND_NZ:
+		case IrType::IF_AND_Z: {
+			return false;
+		}
 	}
 
 	return false;
@@ -5930,7 +6123,7 @@ static bool optimizeConstraints(DeclFunction *function, Constraints **constraint
 				Constraint *rightOldStorage = nullptr;
 				u32 rightOldCount = 0;
 
-				if (op.type != IrType::GOTO) {
+				if (op.type != IrType::GOTO && op.type != IrType::IF_AND_Z && op.type != IrType::IF_AND_NZ) {
 					constraintsForConditionalBranch(op, state, leftState, leftBranchState, rightState, rightBranchState);
 
 					leftOldStorage = state[op.regs[0].unumber].storage;
@@ -5988,43 +6181,117 @@ static bool optimizeConstraints(DeclFunction *function, Constraints **constraint
 	return change;
 }
 
+static bool hasSingleWrite(DeclFunction *function, Reg &reg, bool loopMatters) {
+	u32 write;
+
+	for (write = 0; write < function->ops.size(); write++) {
+		if (function->ops[write].dest == reg) {
+			if (loopMatters && (function->ops[write].flags & IR_IS_IN_LOOP)) {
+				return false;
+			}
+			else {
+				break;
+			}
+			
+		}
+	}
+
+	for (write++; write < function->ops.size(); write++) {
+		if (function->ops[write].dest == reg) 
+			return false;
+	}
+
+	return true;
+}
+
 static bool propagateConstantsGlobally(DeclFunction *function) {
+	PROFILE_FUNC();
+	calculateInLoop(function);
+
 	bool change = false;
 
 	for (u32 i = 0; i < function->ops.size(); i++) {
 		Ir &constant = function->ops[i];
 		
-		if (constant.type != IrType::SET) continue;
-		if (constant.regs[0].type == RegType::REGISTER) continue;
+		if (constant.type == IrType::SET) {
+			if (hasSingleWrite(function, constant.dest, false) && (constant.regs[0].type != RegType::REGISTER || hasSingleWrite(function, constant.regs[0], true))) {
+				for (u32 j = 0; j < function->ops.size(); j++) {
+					Ir &op = function->ops[j];
 
-		for (u32 j = 0; j < function->ops.size(); j++) {
-			if (i == j) continue;
-
-			if (function->ops[j].dest == constant.dest) goto skip;
-		}
-
-		for (u32 j = 0; j < function->ops.size(); j++) {
-			Ir &op = function->ops[j];
-
-			if (op.type == IrType::CALL) {
-				for (Reg &reg : op.callRegs) {
-					if (reg == constant.dest) {
-						reg = constant.regs[0];
-						change = true;
+					if (op.type == IrType::CALL) {
+						for (Reg &reg : op.callRegs) {
+							if (reg == constant.dest) {
+								reg = constant.regs[0];
+								change = true;
+							}
+						}
 					}
-				}
-			}
-			else {
-				for (ulang reg = 0; reg < op.regCount; reg++) {
-					if (op.regs[reg] == constant.dest) {
-						op.regs[reg] = constant.regs[0];
-						change = true;
+					else {
+						for (ulang reg = 0; reg < op.regCount; reg++) {
+							if (op.regs[reg] == constant.dest) {
+								op.regs[reg] = constant.regs[0];
+								change = true;
+							}
+						}
 					}
 				}
 			}
 		}
+		else if (isCompare(constant.type) || constant.type == IrType::AND) {
+			if (hasSingleWrite(function, constant.dest, false))
+				if ((constant.regs[0].type != RegType::REGISTER || hasSingleWrite(function, constant.regs[0], true)) && 
+				(constant.regs[1].type != RegType::REGISTER || hasSingleWrite(function, constant.regs[1], true))) {
+				for (u32 j = 0; j < function->ops.size(); j++) {
+					Ir &op = function->ops[j];
 
-	skip:;
+					if ((op.type == IrType::IF_Z || op.type == IrType::IF_NZ) && op.regs[0] == constant.dest) {
+						switch (constant.type) {
+							case IrType::GREATER:
+								op.type = op.type == IrType::IF_NZ ? IrType::IF_G : IrType::IF_LE;
+								break;
+							case IrType::LESS_EQUAL:
+								op.type = op.type == IrType::IF_NZ ? IrType::IF_LE : IrType::IF_G;
+								break;
+							case IrType::LESS:
+								op.type = op.type == IrType::IF_NZ ? IrType::IF_L : IrType::IF_GE;
+								break;
+							case IrType::GREATER_EQUAL:
+								op.type = op.type == IrType::IF_NZ ? IrType::IF_GE : IrType::IF_L;
+								break;
+							case IrType::ABOVE:
+								op.type = op.type == IrType::IF_NZ ? IrType::IF_A : IrType::IF_BE;
+								break;
+							case IrType::BELOW_EQUAL:
+								op.type = op.type == IrType::IF_NZ ? IrType::IF_BE : IrType::IF_A;
+								break;
+							case IrType::BELOW:
+								op.type = op.type == IrType::IF_NZ ? IrType::IF_B : IrType::IF_AE;
+								break;
+							case IrType::ABOVE_EQUAL:
+								op.type = op.type == IrType::IF_NZ ? IrType::IF_AE : IrType::IF_B;
+								break;
+							case IrType::EQ:
+								op.type = op.type == IrType::IF_NZ ? IrType::IF_EQ : IrType::IF_NEQ;
+								break;
+							case IrType::NOT_EQ:
+								op.type = op.type == IrType::IF_NZ ? IrType::IF_NEQ : IrType::IF_EQ;
+								break;
+							case IrType::AND:
+								op.type = op.type == IrType::IF_NZ ? IrType::IF_AND_NZ : IrType::IF_AND_Z;
+								break;
+							default:
+								assert(false);
+						}
+
+						op.regCount = 2;
+						op.regs[0] = constant.regs[0];
+						op.regs[1] = constant.regs[1];
+
+						change = true;
+					}
+				}
+			}
+		}
 	}
 
 	return change;
@@ -6120,7 +6387,6 @@ void runOptimizer() {
 				|| (optimizationSettings.simplifyConstantExpressions && simplifyConstantExpressions(function) && (canonizeDirty = true, leadersDirty = true))
 				|| optimizeMemoryAccess(function)
 				|| removeNeverUsed(function)
-				|| (propagateConstantsGlobally(function) && (canonizeDirty = true))
 				|| (optimizationSettings.deduplicate && removeCommonExpressions(function))
 				|| (optimizationSettings.deduplicate && moveDuplicateOutOfBranch(function) && (leadersDirty = true))
 				|| (optimizationSettings.deduplicate && moveDuplicateOutOfBranchSlow(function) && (leadersDirty = true))
@@ -6129,6 +6395,7 @@ void runOptimizer() {
 				|| (optimizationSettings.moveStatementToUse && moveOverwritePastUse(function))
 				|| (optimizationSettings.moveStatementToUse && moveStatementToUse(function, usages) && (leadersDirty = true))
 				|| (optimizationSettings.moveStatementToUse && moveStatementPastBranch(function) && (leadersDirty = true))
+				|| (optimizationSettings.deduplicate && propagateConstantsGlobally(function) && (canonizeDirty = true))
 				|| (reduceRegisterNumbers(function, registersUsed, compiler.argCount),
 				(optimizationSettings.useConstraints && optimizeConstraints(function, &constraints, constraintsSize) && (canonizeDirty = true, leadersDirty = true)))
 				|| (optimizationSettings.deduplicate && deduplicate(function) && (leadersDirty = true))

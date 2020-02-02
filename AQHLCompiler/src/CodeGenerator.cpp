@@ -531,20 +531,23 @@ static void writeSubstInsnForShift(ulang opcode, ulang arg1, Reg &subst, ulang c
 	}
 }
 
-static bool opSetsFlags(IrType type) {
-	switch (type) {
+static bool opSetsFlags(Ir &op) {
+	switch (op.type) {
 		case IrType::ADD:
-		case IrType::SUB:
-		case IrType::NEG:
-		case IrType::LSHIFT:
-		case IrType::RSHIFT:
-		case IrType::ARSHIFT:
 		case IrType::AND:
 		case IrType::OR:
 		case IrType::XOR:
-		case IrType::NOT:
 		case IrType::EQ:
 		case IrType::NOT_EQ:
+		case IrType::SUB:
+		case IrType::LSHIFT:
+		case IrType::RSHIFT:
+		case IrType::ARSHIFT:
+			// Commutative binary, sub and shift only clobbers the flags if all three registers are frame registers
+			return op.dest.unumber < 4 || op.regs[0].type != RegType::REGISTER || op.regs[0].unumber < 4 || op.regs[1].type != RegType::REGISTER || op.regs[1].unumber < 4;
+		case IrType::NOT:
+		case IrType::NEG:
+			// Unary operators never clobber the flags
 			return true;
 		default:
 			return false;
@@ -560,7 +563,7 @@ static void writeIfZOrNz(DeclFunction *function, u32 index, Ir &op, ulang condit
 	if (!needCompare) {
 		Ir &last = function->ops[index - 1];
 
-		needCompare = !(last.dest == op.regs[0] && opSetsFlags(op.type));
+		needCompare = !(last.dest == op.regs[0] && opSetsFlags(last));
 	}
 
 	if (condition == C_NZ && op.regs[0].type == RegType::REGISTER && op.regs[0].unumber == C) {
@@ -677,6 +680,67 @@ static void writeIf(DeclFunction *function, u32 index, Ir &op, ulang condition) 
 	Reg &left = op.regs[0];
 	Reg &right = op.regs[1];
 
+	if (right.type == RegType::IMMEDIATE) {
+		switch (condition) {
+			case C_G: {
+				if (right.number == -1) {
+					writeIfZOrNz(function, index, op, C_NS);
+					return;
+				}
+				break;
+			}
+			case C_LE: {
+				if (right.number == -1) {
+					writeIfZOrNz(function, index, op, C_S);
+					return;
+				}
+				break;
+			}
+			case C_L: {
+				if (right.number == 0) {
+					writeIfZOrNz(function, index, op, C_S);
+					return;
+				}
+				break;
+			}
+			case C_GE: {
+				if (right.number == 0) {
+					writeIfZOrNz(function, index, op, C_NS);
+					return;
+				}
+				break;
+			}
+			case C_A: {
+				if (right.unumber == SLANG_MAX) {
+					writeIfZOrNz(function, index, op, C_S);
+					return;
+				}
+				break;
+			}
+			case C_BE: {
+				if (right.unumber == SLANG_MAX) {
+					writeIfZOrNz(function, index, op, C_NS);
+					return;
+				}
+				break;
+			}
+			case C_B: {
+				if (right.unumber == SLANG_MAX + 1) {
+					writeIfZOrNz(function, index, op, C_NS);
+					return;
+				}
+				break;
+			}
+			case C_AE: {
+				if (right.unumber == SLANG_MAX + 1) {
+					writeIfZOrNz(function, index, op, C_S);
+					return;
+				}
+				break;
+			}				
+		}
+	}
+
 	if (left.type == RegType::REGISTER) {
 		if (right.type == RegType::REGISTER) {
 			if (right.unumber < 4) {
@@ -718,6 +782,56 @@ static void writeIf(DeclFunction *function, u32 index, Ir &op, ulang condition) 
 	else {
 		writeSubstInsn(SET_REG_TO_REG, E, left);
 		writeSubstInsn(COMP, E, right);
+		writeGoto(function, op, condition);
+	}
+}
+
+
+static void writeTest(DeclFunction *function, u32 index, Ir &op, ulang condition) {
+	Reg &left = op.regs[0];
+	Reg &right = op.regs[1];
+
+	if (left.type == RegType::REGISTER) {
+		if (right.type == RegType::REGISTER) {
+			if (right.unumber < 4) {
+				program[writeIndex++] = INSN(TEST, left.unumber, right.unumber);
+				writeGoto(function, op, condition);
+			}
+			else if (left.unumber < 4) {
+				readFrameRegisterToE(right.unumber);
+				program[writeIndex++] = INSN(TEST, E, left.unumber);
+				writeGoto(function, op, condition);
+			}
+			else {
+				readFrameRegisterToE(left.unumber);
+
+				auto save = findSaveRegister(function, index);
+				saveRegister(save);
+
+				readFrameRegisterToArg1(save.reg, right.unumber);
+
+				program[writeIndex++] = INSN(TEST, E, save.reg);
+
+				restoreRegister(save);
+
+				writeGoto(function, op, condition);
+			}
+		}
+		else {
+			if (left.unumber < 4) {
+				writeSubstInsn(TEST, left.unumber, right);
+				writeGoto(function, op, condition);
+			}
+			else {
+				readFrameRegisterToE(left.unumber);
+				writeSubstInsn(TEST, E, right);
+				writeGoto(function, op, condition);
+			}
+		}
+	}
+	else {
+		writeSubstInsn(SET_REG_TO_REG, E, left);
+		writeSubstInsn(TEST, E, right);
 		writeGoto(function, op, condition);
 	}
 }
@@ -3847,6 +3961,12 @@ static void writeOp(DeclFunction *function, u32 index) {
 			break;
 		case IrType::IF_AE:
 			writeIf(function, index, op, C_AE);
+			break;
+		case IrType::IF_AND_Z:
+			writeTest(function, index, op, C_Z);
+			break;
+		case IrType::IF_AND_NZ:
+			writeTest(function, index, op, C_NZ);
 			break;
 		case IrType::AND:
 			writeCommutativeBinary(function, index, op, AND);

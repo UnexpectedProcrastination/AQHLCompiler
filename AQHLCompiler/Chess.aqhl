@@ -53,7 +53,7 @@ function Main() {
 		
 		hasValidMove = false;
 		each (*piece, i: board, 64) {
-			if ((piece & WHITE_FLAG) == whiteTurn) {
+			if (((piece ^ whiteTurn) & WHITE_FLAG) == 0) {
 				GetValidMoves(i);
 				
 				if (hasValidMove) break;
@@ -160,7 +160,7 @@ function Main() {
 						}
 						
 						
-						board[moveTo] = promoteTo | (board[moveTo] & WHITE_FLAG);
+						board[moveTo] = promoteTo | whiteTurn;
 						boardCopy[moveTo] = board[moveTo];
 					}
 				
@@ -448,6 +448,7 @@ function local GetValidMoves(pos) {
 	
 	var moved = piece & HAS_MOVED_FLAG;
 	var color = piece & WHITE_FLAG;
+	
 	piece &= 0xFF;
 	
 	if (piece == 'P' && !color) { // If this is a black pawn

@@ -8,11 +8,11 @@
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <LocalDebuggerCommandArguments>-O2 -serial Chess.aqhl -outputSymbols -outputIr Chess2.aq</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArguments>-O2 -serial Chess.aqhl -outputSymbols -outputIr Chess.aq</LocalDebuggerCommandArguments>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <LocalDebuggerCommandArguments>-O2 -serial Chess.aqhl -outputSymbols -outputIr Chess2.aq</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArguments>-O2 -serial Chess.aqhl -outputSymbols -outputIr Chess.aq</LocalDebuggerCommandArguments>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
   </PropertyGroup>
 </Project>

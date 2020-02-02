@@ -20,6 +20,8 @@
 	definer(IF_AE), \
 	definer(IF_B), \
 	definer(IF_BE), \
+	definer(IF_AND_Z), \
+	definer(IF_AND_NZ), \
 	definer(GOTO), \
 	definer(AND), \
 	definer(OR), \
@@ -209,6 +211,7 @@ struct Reg {
 #define IR_IS_LEADER 0x1
 #define IR_IS_JUMP_TARGET 0x2
 #define IR_IS_MULTIPLE_JUMP_TARGET 0x4
+#define IR_IS_IN_LOOP 0x8
 
 struct Ir {
 	union {
