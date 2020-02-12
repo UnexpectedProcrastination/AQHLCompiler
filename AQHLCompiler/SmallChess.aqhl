@@ -1,6 +1,3 @@
-#load "IO.aqhl"
-#load "Memory.aqhl"
-
 // hasMoved flag 0x100
 // isWhite flag  0x8000
 
@@ -11,6 +8,60 @@
 // B bishop 0x42
 // N knight 0x4E
 // P pawn   0x50
+
+array PrintChar[] = {
+	0b010000_000_000_0000, //out a; 
+	0b010000_000_100_0000, //out 0;
+	0b000110_111_000_0000  //ret;
+};
+
+array ReadChar[] = {
+	0b001011_010_000_0000, // set c, ip;
+	0b100011_000_000_0000, //in a; 
+	0b000001_111_010_0101, //jump:z, c;
+	0b001011_010_000_0000, // set c, ip;
+	0b100011_001_000_0000, //in b; 
+	0b000001_111_010_0110, //jump:nz, c;
+	0b000110_111_000_0000  //ret;
+};
+
+function MemoryZero(dest, size) {
+	each (*out: dest, size) out = 0;
+}
+function Clear() {
+	PrintString("\e[2J\e[H");
+}
+
+function ReadLine(buffer, size) {
+	var pointer = buffer;
+
+	for (var end = buffer + size - 1; pointer #< end;) {
+		var char = ReadChar();
+		
+		if (char == '\b') {
+			if (pointer != buffer) {
+				PrintChar(char);
+				PrintChar(' ');
+				PrintChar(char);
+				--pointer;
+			}
+		} else if (char == '\n') {
+			PrintChar(char);
+			break;
+		} else {
+			PrintChar(char);
+			*(pointer++) = char;
+		}
+	}
+	
+	*pointer = 0;
+}
+
+function PrintString(string) {
+	for (var char; char = *string; ++string) {
+		PrintChar(char);
+	}
+}
 
 array local board[64] = {
 		'R' | WHITE_FLAG, 'N' | WHITE_FLAG, 'B' | WHITE_FLAG, 'Q' | WHITE_FLAG, 'K' | WHITE_FLAG, 'B' | WHITE_FLAG, 'N' | WHITE_FLAG, 'R' | WHITE_FLAG, 

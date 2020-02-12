@@ -19,6 +19,21 @@ static Array<Decl *> globals;
 static Array<Array<Decl *>> locals;
 static Array<Dependency> dependencies;
 
+void resetResolver() {
+	for (auto it : globals) delete it;
+	globals.clear();
+
+	for (auto &it : locals) {
+		for (auto i : it) {
+			delete i;
+		}
+
+		it.clear();
+	}
+
+	locals.clear();
+}
+
 static bool doResolve(DeclWithExpr *decl, AstLeafNode *unresolved, Decl *resolve, bool *ready) {
 	if (resolve->type == DeclType::VAR) {
 		if (unresolved->type == AstType::UNRESOLVED_GLOBAL_VAR_ADDRESS) {

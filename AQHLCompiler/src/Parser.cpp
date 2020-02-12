@@ -208,6 +208,7 @@ enum class Lexer : u8 {
 static Array<Token> keywords(16);
 
 void initLexer() {
+	keywords.clear();
 	keywords.add(IF);
 	keywords.add(VAR);
 	keywords.add(RETURN);

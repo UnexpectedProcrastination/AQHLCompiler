@@ -138,7 +138,7 @@ static bool blockWritten[(ULANG_MAX + 1) / BLOCK_SIZE];
 static u32 substsRemainingInBlock[(ULANG_MAX + 1) / BLOCK_SIZE];
 
 // @Improvement: this is fine for 16 bit compilation but doesn't scale
-static ulang program[static_cast<u32>(ULANG_MAX) + 1];
+static ulang program[ULANG_MAX + 1];
 static ulang writeIndex;
 
 
@@ -1889,7 +1889,7 @@ static void writeCall(DeclFunction *function, u32 index, Ir &op) {
 	}
 
 
-	for (u32 bits = invalidate; bits; bits &= bits - 1) {
+	for (u32 bits = invalidate; bits; bits = _blsr_u64(bits)) {
 		unsigned long idx;
 		BitScanForward(&idx, bits);
 
@@ -4494,4 +4494,17 @@ void runCodeGen() {
 	}
 
 	blockWriterQueue.add({ nullptr, 0 });
+}
+
+
+void resetCodeGen() {
+	writeIndex = 0;
+
+	mainFunc = nullptr;
+	initializers.clear();
+	binaryEndDecl.clear();
+
+
+	memset(blockWritten, 0, sizeof(blockWritten));
+	memset(substsRemainingInBlock, 0, sizeof(substsRemainingInBlock));
 }

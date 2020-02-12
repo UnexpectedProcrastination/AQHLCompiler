@@ -14,6 +14,7 @@
 #include <sstream>
 #include <atomic>
 #include <algorithm>
+#include <immintrin.h>
 
 
 #ifdef PROFILE

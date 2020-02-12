@@ -57,9 +57,10 @@ bool validateName(String filename) {
 	return true;
 }
 
+static ArraySet<String> buildFileNames;
+
 bool addBuildFile(const char *file, bool silent = false) {
 	static std::mutex buildFileNamesMutex;
-	static ArraySet<String> buildFileNames;
 
 	if (!PathFileExistsA(file)) { // @Platform
 		if (silent) {
@@ -155,8 +156,26 @@ bool doColorPrint = true;
 
 static std::mutex outputMutex;
 
-
 static ArraySet<u64> disabledWarnings;
+
+static void reset() {
+	disabledWarnings.clear();
+	buildFiles.clear();
+	buildFileNames.clear();
+
+	parserQueue.clear();
+	resolverQueue.clear();
+	optimizerQueue.clear();
+	codeGenQueue.clear();
+	blockWriterQueue.clear();
+	fileUidToNameMap.clear();
+
+	resetCodeGen();
+	resetResolver();
+
+	filesCompleted = 0;
+}
+
 
 int main(int argc, char *argv[]) {
 #if PROFILE
@@ -357,70 +376,76 @@ int main(int argc, char *argv[]) {
 			return 1;
 		}
 
-
-		if (!addBuildFile(input)) {
-			return 1;
-		}
-
-		initLexer();
-
 		PROFILE_END();
 
+#define ITERATIONS 1
 
-		PROFILE_START("Launch threads");
-		for (u32 i = 0; i < NUM_PARSER_THREADS; i++) {
-			std::thread parseThread(runParser);
-			parseThread.detach();
-		}
-
-		std::thread resolverThread(runResolver);
-		resolverThread.detach();
-
-
-		for (u32 i = 0; i < NUM_OPTIMIZER_THREADS; ++i) {
-			std::thread optimizerThread(runOptimizer);
-			optimizerThread.detach();
-		}
-
-		std::thread codeGenThread(runCodeGen);
-
-		codeGenThread.detach();
-
-		std::thread blockWriterThread(runBlockWriter);
-		PROFILE_END();
-
-		u32 fileUid = 0;
-
-		while (true) {
-			if (hadErrors) break;
-
-			Scope_Lock lock(buildFilesMutex);
-
-			if (filesCompleted == buildFiles.size()) {
-				break;
+		for (u32 aaa = 0; aaa < ITERATIONS; aaa++) {
+			if (!addBuildFile(input)) {
+				return 1;
 			}
 
-			while (fileUid < buildFiles.size()) {
-				String name = stripFileName(buildFiles[fileUid]);
-				const char *cString = toCString(name);
-				name.free();
+			initLexer();
 
-				{
-					Scope_Lock lock(fileUidToNameMapMutex);
+			PROFILE_START("Launch threads");
+			for (u32 i = 0; i < NUM_PARSER_THREADS; i++) {
+				std::thread parseThread(runParser);
+				parseThread.detach();
+			}
 
-					fileUidToNameMap.add(cString);
+			std::thread resolverThread(runResolver);
+			resolverThread.detach();
+
+
+			for (u32 i = 0; i < NUM_OPTIMIZER_THREADS; ++i) {
+				std::thread optimizerThread(runOptimizer);
+				optimizerThread.detach();
+			}
+
+			std::thread codeGenThread(runCodeGen);
+
+			codeGenThread.detach();
+
+			std::thread blockWriterThread(runBlockWriter);
+			PROFILE_END();
+
+			u32 fileUid = 0;
+
+			while (true) {
+				if (hadErrors) break;
+
+				Scope_Lock lock(buildFilesMutex);
+
+				if (filesCompleted == buildFiles.size()) {
+					break;
 				}
 
+				while (fileUid < buildFiles.size()) {
+					String name = stripFileName(buildFiles[fileUid]);
+					const char *cString = toCString(name);
+					name.free();
 
-				parserQueue.add({ buildFiles[fileUid], fileUid });
+					{
+						Scope_Lock lock(fileUidToNameMapMutex);
 
-				fileUid++;
+						fileUidToNameMap.add(cString);
+					}
+
+
+					parserQueue.add({ buildFiles[fileUid], fileUid });
+
+					fileUid++;
+				}
+			}
+
+			parserQueue.add({ nullptr, 0 });
+
+			blockWriterThread.join();
+
+			if (aaa != ITERATIONS - 1) {
+				reset();
 			}
 		}
-
-		parserQueue.add({ nullptr, 0 });
-
-		blockWriterThread.join();
 	}
 	auto t2 = std::chrono::high_resolution_clock::now();
 	std::chrono::duration<double> time_span = std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1);
@@ -468,7 +493,9 @@ int main(int argc, char *argv[]) {
 
 #endif
 
+#if BUILD_DEBUG
 	std::cin.get();
+#endif
 }
 
 #if PROFILE

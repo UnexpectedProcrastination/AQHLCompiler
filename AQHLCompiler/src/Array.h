@@ -96,7 +96,12 @@ public:
 	}
 
 	T *begin() {
-		return storage ? storage : small;
+		if (storage) {
+			return storage;
+		}
+		else {
+			return small;
+		}
 	}
 
 	T *end() {
@@ -104,7 +109,12 @@ public:
 	}
 
 	const T *begin() const {
-		return storage ? storage : small;
+		if (storage) {
+			return storage;
+		}
+		else {
+			return small;
+		}
 	}
 
 	const T *end() const {

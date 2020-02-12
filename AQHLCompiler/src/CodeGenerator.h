@@ -6,3 +6,5 @@
 extern WorkQueue<Decl *> codeGenQueue;
 
 void runCodeGen();
+
+void resetCodeGen();

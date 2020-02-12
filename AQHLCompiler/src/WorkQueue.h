@@ -92,6 +92,11 @@ public:
 
 		return job;
 	}
+
+	void clear() {
+		head = 0;
+		tail = 0;
+	}
 };
 
 struct WorkQueueAdd {

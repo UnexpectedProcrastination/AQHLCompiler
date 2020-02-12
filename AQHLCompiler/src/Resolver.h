@@ -7,3 +7,5 @@
 extern WorkQueue<Decl *> resolverQueue;
 
 void runResolver();
+
+void resetResolver();

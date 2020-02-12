@@ -2152,7 +2152,7 @@ static void calculateInterferenceGraphSlow(DeclFunction *function, u64 *interfer
 		for (u64 j = 0; j < addressCount; j++) {
 			u64 opIn = liveIn[i * addressCount + j];
 
-			for (u64 bits = opIn; bits; bits &= bits - 1) {
+			for (u64 bits = opIn; bits; bits = _blsr_u64(bits)) {
 				unsigned long index;
 				BitScanForward64(&index, bits);
 
@@ -2167,7 +2167,7 @@ static void calculateInterferenceGraphSlow(DeclFunction *function, u64 *interfer
 		for (u64 j = 0; j < addressCount; j++) {
 			u64 opOut = liveOut[i * addressCount + j];
 
-			for (u64 bits = opOut; bits; bits &= bits - 1) {
+			for (u64 bits = opOut; bits; bits = _blsr_u64(bits)) {
 				unsigned long index;
 				BitScanForward64(&index, bits);
 
@@ -2197,7 +2197,7 @@ static void calculateInterferenceGraph(DeclFunction *function, u64 *interference
 		for (u64 i = 0; i < function->ops.size(); i++) {
 			u64 opIn = liveIn[i];
 
-			for (u64 bits = opIn; bits; bits &= bits - 1) {
+			for (u64 bits = opIn; bits; bits = _blsr_u64(bits)) {
 				unsigned long idx;
 				BitScanForward64(&idx, bits);
 
@@ -2205,7 +2205,7 @@ static void calculateInterferenceGraph(DeclFunction *function, u64 *interference
 			}
 
 			u64 opOut = liveOut[i];
-			for (u64 bits = opOut; bits; bits &= bits - 1) {
+			for (u64 bits = opOut; bits; bits = _blsr_u64(bits)) {
 				unsigned long idx;
 				BitScanForward64(&idx, bits);
 
@@ -2281,7 +2281,7 @@ static void calculateLiveRangesSlow(DeclFunction *function, u64 *bits) {
 
 	//for (u64 i = 0; i < function->ops.size(); i++) {
 	//	for (u32 j = 0; j < addressCount; j++) {
-	//		for (u64 bits = liveIn[i * addressCount + j]; bits; bits &= bits - 1) {
+	//		for (u64 bits = liveIn[i * addressCount + j]; bits; bits = _blsr_u64(bits)) {
 	//			unsigned long index;
 	//			BitScanForward64(&index, bits);
 
@@ -2292,7 +2292,7 @@ static void calculateLiveRangesSlow(DeclFunction *function, u64 *bits) {
 	//			}
 	//		}
 
-	//		for (u64 bits = liveOut[i * addressCount + j]; bits; bits &= bits - 1) {
+	//		for (u64 bits = liveOut[i * addressCount + j]; bits; bits = _blsr_u64(bits)) {
 	//			unsigned long index;
 	//			BitScanForward64(&index, bits);
 
@@ -2401,7 +2401,7 @@ static bool tryCoalesceSlow(DeclFunction *function, Reg &dest, Reg &src, u64 *in
 	if (interferenceBits[dest.unumber * addressCount + src.unumber / BIT_COUNT_IN_U64] & (1ULL << (src.unumber % BIT_COUNT_IN_U64))) return false;
 
 	for (u64 i = 0; i < addressCount; i++) {
-		for (u64 bits = interferenceBits[dest.unumber * addressCount + i]; bits; bits &= bits - 1) {
+		for (u64 bits = interferenceBits[dest.unumber * addressCount + i]; bits; bits = _blsr_u64(bits)) {
 			unsigned long inter;
 			BitScanForward64(&inter, bits);
 
@@ -2433,7 +2433,7 @@ static bool tryCoalesce(DeclFunction *function, Reg &dest, Reg &src, u64 *interf
 
 	if (interferenceBits[dest.unumber] & (1ULL << src.unumber)) return false;
 
-	for (u64 bits = interferenceBits[dest.unumber]; bits; bits &= bits - 1) {
+	for (u64 bits = interferenceBits[dest.unumber]; bits; bits = _blsr_u64(bits)) {
 		unsigned long inter;
 		BitScanForward64(&inter, bits);
 
@@ -2639,7 +2639,7 @@ static void allocateRegistersSlow(DeclFunction *function, ulang parameterCount, 
 
 		for (ulang i = 0; i < 4; i++) {
 			for (u64 j = 0; j < addressCount; j++) {
-				for (u64 bits = interferences[reg * addressCount + j]; bits; bits &= bits - 1) {
+				for (u64 bits = interferences[reg * addressCount + j]; bits; bits = _blsr_u64(bits)) {
 					unsigned long inter = 0;
 					BitScanForward64(&inter, bits);
 
@@ -2669,7 +2669,7 @@ static void allocateRegistersSlow(DeclFunction *function, ulang parameterCount, 
 		loop:
 
 			for (u64 j = 0; j < addressCount; j++) {
-				for (u64 bits = interferences[reg * addressCount + j]; bits; bits &= bits - 1) {
+				for (u64 bits = interferences[reg * addressCount + j]; bits; bits = _blsr_u64(bits)) {
 					unsigned long inter = 0;
 					BitScanForward64(&inter, bits);
 
@@ -2824,7 +2824,7 @@ static void allocateRegisters(DeclFunction *function, ulang parameterCount, u64 
 			ulang select = 4;
 
 			for (ulang i = 0; i < 4; i++) {
-				for (u64 bits = interferences[reg]; bits; bits &= bits - 1) {
+				for (u64 bits = interferences[reg]; bits; bits = _blsr_u64(bits)) {
 					unsigned long inter = 0;
 					BitScanForward64(&inter, bits);
 
@@ -2850,7 +2850,7 @@ static void allocateRegisters(DeclFunction *function, ulang parameterCount, u64 
 			{
 			loop:
 
-				for (u64 bits = interferences[reg]; bits; bits &= bits - 1) {
+				for (u64 bits = interferences[reg]; bits; bits = _blsr_u64(bits)) {
 					unsigned long inter = 0;
 					BitScanForward64(&inter, bits);
 

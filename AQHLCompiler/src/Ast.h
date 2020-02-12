@@ -171,8 +171,7 @@ enum class RegType : u8 {
 	NONE, 
 	REGISTER, 
 	STATIC_ADROF, 
-	IMMEDIATE, 
-	UNALLOCATED
+	IMMEDIATE
 };
 
 struct Reg {
@@ -194,7 +193,6 @@ struct Reg {
 
 		switch (type) {
 			case RegType::REGISTER:
-			case RegType::UNALLOCATED:
 				return unumber == other.unumber;
 			case RegType::STATIC_ADROF:
 				return number == other.number && decl == other.decl;
@@ -216,7 +214,7 @@ struct Reg {
 struct Ir {
 	union {
 		Reg regs[2];
-		SmallArray<Reg, 1> callRegs;
+		Array<Reg> callRegs;
 	};
 	Reg dest = { nullptr, 0, RegType::NONE };
 
