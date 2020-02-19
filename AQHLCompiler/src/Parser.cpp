@@ -1892,7 +1892,7 @@ static AstNode *parseUnaryExpr(LexerState *state) {
 			AstNode *inner = tree->children[0];
 
 			tree->children.free();
-			// delete tree; This shouldn't happend to often so we won't wast much space in the arena
+			// delete tree; // This shouldn't happend to often so we won't wast much space in the arena @Leak
 
 			return inner;
 		}

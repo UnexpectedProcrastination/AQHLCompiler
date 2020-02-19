@@ -1971,6 +1971,16 @@ static bool basicThreadJumps(DeclFunction *function) {
 					op.jumpTarget = target->jumpTarget;
 					change = true;
 				}
+				else if (isConditionalBranch(target->type)) {
+					if (target->jumpTarget == i + 1) {
+						op.type = getOpposite(target->type);
+						op.regCount = target->regCount;
+						op.regs[0] = target->regs[0];
+						op.regs[1] = target->regs[1];
+						op.jumpTarget++;
+						change = true;
+					}
+				}
 			}
 		}
 		else if (isConditionalBranch(op.type)) {
@@ -4823,6 +4833,90 @@ static bool inlineGotoRelocatable(DeclFunction *function) {
 	return change;
 }
 
+
+static u32 isInlinableConditionBranch(DeclFunction *function, u32 index, u32 gotoFrom) {
+	u32 size = 0;
+
+	for (u32 i = index; i < function->ops.size(); i++) {
+		Ir &op = function->ops[i];
+		++size;
+
+		if (isConditionalBranch(op.type)) {
+			if (op.jumpTarget == gotoFrom + 1) {
+				return size;
+			}
+			else {
+				return 0;
+			}
+		}
+
+
+		if (op.type == IrType::RETURN || op.type == IrType::GOTO) return 0; // This should be dealt with by inlineRelocatable
+	}
+
+	return size;
+}
+
+static bool inlineConditionBranch(DeclFunction *function) {
+	bool change = false;
+
+	for (s32 i = 0; i < function->ops.size(); i++) {
+		Ir &op = function->ops[i];
+
+		if (op.type == IrType::GOTO) {
+			u32 exitBlockSize = isInlinableConditionBranch(function, op.jumpTarget, i);
+
+			if (exitBlockSize && op.jumpTarget + exitBlockSize - 1 != i /* Don't try to unroll infinite loops */) {
+				function->ops.reserve(function->ops.size() + exitBlockSize - 1);
+
+				function->ops.count += exitBlockSize - 1;
+
+				for (s32 j = function->ops.size() - exitBlockSize; j > i; j--) {
+					function->ops[j + exitBlockSize - 1] = function->ops[j];
+				}
+
+				int a = 0; // dummy to set breakpoint here
+
+				for (u32 j = 0; j < function->ops.size(); j++) {
+					Ir &branch = function->ops[j];
+
+					if (branch.jumpTarget > i)
+						branch.jumpTarget += exitBlockSize - 1;
+				}
+
+				u32 target = op.jumpTarget;
+
+				for (u32 j = 0; j < exitBlockSize; j++) {
+					Ir &move = function->ops[target + j];
+					Ir &dest = function->ops[i + j];
+
+					if (move.type == IrType::CALL) {
+						dest.type = move.type;
+						dest.dest = move.dest;
+						dest.flags = move.flags;
+						dest.regCount = move.regCount;
+						dest.callRegs = decltype(dest.callRegs)(std::initializer_list<Reg>(move.callRegs.begin(), move.callRegs.end()));
+					}
+					else {
+						dest = move;
+					}
+
+					if (j == exitBlockSize - 1) {
+						a = 0;
+						
+						dest.type = getOpposite(dest.type);
+						dest.jumpTarget = target + exitBlockSize;
+					}
+				}
+
+				change = true;
+			}
+		}
+	}
+
+	return change;
+}
+
 static bool moveStatementToUse(DeclFunction *function, Array<u32> &usages) {
 	PROFILE_FUNC();
 
@@ -6297,6 +6391,46 @@ static bool propagateConstantsGlobally(DeclFunction *function) {
 	return change;
 }
 
+static bool fixStandardPatterns(DeclFunction *function) {
+	bool change = false;
+
+	for (u32 i = 0; i + 1 < function->ops.size(); i++) {
+		Ir &set = function->ops[i];
+		Ir &branch = function->ops[i + 1];
+
+		if (set.type == IrType::SET && (branch.type == IrType::IF_Z || branch.type == IrType::IF_NZ) && set.dest == branch.regs[0] && set.regs[0].type == RegType::IMMEDIATE) {
+			function->ops.add();
+
+			// Redeclare references because array could have resized
+			Ir &set = function->ops[i];
+			Ir &branch = function->ops[i + 1];
+
+			for (u64 j = function->ops.size(); j > i + 2; j--) {
+				function->ops[j - 1] = function->ops[j - 2];
+			}
+
+			int a = 0; // For breakpoint
+
+			for (auto &jump : function->ops) {
+				if (jump.jumpTarget >= i + 1)
+					++jump.jumpTarget;
+			}
+
+			branch.regCount = 0;
+			
+			if ((branch.type == IrType::IF_NZ) == (set.regs[0].number == 0)) {
+				branch.jumpTarget = i + 3;
+			}
+
+			branch.type = IrType::GOTO;
+
+			change = true;
+		}
+	}
+
+	return change;
+}
+
 void runOptimizer() {
 	PROFILE_FUNC();
 
@@ -6387,11 +6521,13 @@ void runOptimizer() {
 				|| (optimizationSettings.simplifyConstantExpressions && simplifyConstantExpressions(function) && (canonizeDirty = true, leadersDirty = true))
 				|| optimizeMemoryAccess(function)
 				|| removeNeverUsed(function)
+				|| (optimizationSettings.propagateConstants && fixStandardPatterns(function) && (leadersDirty = true))
 				|| (optimizationSettings.deduplicate && removeCommonExpressions(function))
 				|| (optimizationSettings.deduplicate && moveDuplicateOutOfBranch(function) && (leadersDirty = true))
 				|| (optimizationSettings.deduplicate && moveDuplicateOutOfBranchSlow(function) && (leadersDirty = true))
 				|| (optimizationSettings.moveStatementToUse && switchJumpsOverExitBlock(function) && (leadersDirty = true))
 				|| (optimizationSettings.moveStatementToUse && inlineGotoRelocatable(function) && (leadersDirty = true))
+				|| (optimizationSettings.moveStatementToUse && inlineConditionBranch(function) && (leadersDirty = true))
 				|| (optimizationSettings.moveStatementToUse && moveOverwritePastUse(function))
 				|| (optimizationSettings.moveStatementToUse && moveStatementToUse(function, usages) && (leadersDirty = true))
 				|| (optimizationSettings.moveStatementToUse && moveStatementPastBranch(function) && (leadersDirty = true))
